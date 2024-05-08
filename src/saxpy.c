@@ -17,6 +17,48 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <pthread.h>
+
+// Estructura para los argumentos del hilo
+struct ThreadArgs {
+    double *X;
+    double *Y;
+    double a;
+    int p;
+    int max_iters;
+    int thread_id;
+    double *Y_avgs;
+};
+
+// Función que ejecutará cada hilo
+/**Cada hilo debe procesar aproximadamente la mitad de los elementos del vector Y. 
+ Por lo tanto, se divide el trabajo dividiendo el rango del bucle iterativo entre los dos hilos.*/
+void *saxpy_thread(void *args) {
+    struct ThreadArgs *thread_args = (struct ThreadArgs *)args;
+    int p = thread_args->p;
+    int max_iters = thread_args->max_iters;
+    double *X = thread_args->X;
+    double *Y = thread_args->Y;
+    double a = thread_args->a;
+    double *Y_avgs = thread_args->Y_avgs;
+    int thread_id = thread_args->thread_id;
+
+    // Dividir el trabajo
+    int start_index = (thread_id == 0) ? 0 : p / 2;
+    int end_index = (thread_id == 0) ? p / 2 : p;
+	//si thread_id es igual a 0 (es decir, es el primer hilo), entonces start_index será 0, entonces este hilo comenzará desde el principio del vector. 
+	//Si thread_id no es 0 (es decir, es el segundo hilo), entonces start_index será p / 2, entonces este hilo comenzará desde la mitad del vector.
+
+    // Realizar operación SAXPY iterativa
+    for (int it = 0; it < max_iters; it++) {
+        for (int i = start_index; i < end_index; i++) {
+            Y[i] = Y[i] + a * X[i];
+            Y_avgs[it + thread_id * max_iters] += Y[i];
+        }
+    }
+
+    return NULL;
+}
 
 int main(int argc, char* argv[]){
 	// Variables to obtain command line parameters
@@ -29,14 +71,14 @@ int main(int argc, char* argv[]){
 	double a;
 	double* Y;
 	double* Y_avgs;
-	int i, it;
+	int i;
 	// Variables to get execution time
 	struct timeval t_start, t_end;
 	double exec_time;
 
 	// Getting input values
-	int opt;
-	while((opt = getopt(argc, argv, ":p:s:n:i:")) != -1){  
+	//int opt;
+	/*while((opt = getopt(argc, argv, ":p:s:n:i:")) != -1){  
 		switch(opt){  
 			case 'p':  
 			printf("vector size: %s\n", optarg);
@@ -62,7 +104,7 @@ int main(int argc, char* argv[]){
 			fprintf(stderr, "Usage: %s [-p <vector size>] [-s <seed>] [-n <threads number>] [-i <maximum itertions>]\n", argv[0]);
 			exit(EXIT_FAILURE);
 		}  
-	}  
+	}  */
 	srand(seed);
 
 	printf("p = %d, seed = %d, n_threads = %d, max_iters = %d\n", \
@@ -71,15 +113,16 @@ int main(int argc, char* argv[]){
 	// initializing data
 	X = (double*) malloc(sizeof(double) * p);
 	Y = (double*) malloc(sizeof(double) * p);
-	Y_avgs = (double*) malloc(sizeof(double) * max_iters);
+	//Y_avgs = (double*) malloc(sizeof(double) * max_iters);
+	Y_avgs = (double*) calloc(sizeof(double), max_iters * n_threads); // Inicializar todos los elementos a 0
 
 	for(i = 0; i < p; i++){
 		X[i] = (double)rand() / RAND_MAX;
 		Y[i] = (double)rand() / RAND_MAX;
 	}
-	for(i = 0; i < max_iters; i++){
+	/*for(i = 0; i < max_iters; i++){
 		Y_avgs[i] = 0.0;
-	}
+	}*/
 	a = (double)rand() / RAND_MAX;
 
 #ifdef DEBUG
@@ -103,20 +146,44 @@ int main(int argc, char* argv[]){
 	 */
 	gettimeofday(&t_start, NULL);
 	//SAXPY iterative SAXPY mfunction
-	for(it = 0; it < max_iters; it++){
-		for(i = 0; i < p; i++){
-			Y[i] = Y[i] + a * X[i];
-			Y_avgs[it] += Y[i];
-		}
-		Y_avgs[it] = Y_avgs[it] / p;
-	}
+	// Crear hilos y asignarles trabajo
+    pthread_t threads[n_threads];
+    struct ThreadArgs thread_args[n_threads]; //ThreadArgs se utiliza para pasar argumentos a los hilos en el programa. Contiene información necesaria para que cada hilo realice su trabajo de manera independiente
+	for (int t = 0; t < n_threads; t++) {
+        thread_args[t].X = X;
+        thread_args[t].Y = Y;
+        thread_args[t].a = a;
+        thread_args[t].p = p;
+        thread_args[t].max_iters = max_iters;
+        thread_args[t].thread_id = t;
+        thread_args[t].Y_avgs = Y_avgs;
+
+        pthread_create(&threads[t], NULL, saxpy_thread, (void *)&thread_args[t]);
+		/* Cada hilo recibe una parte diferente del trabajo y ejecuta la función saxpy_thread que realiza la operación SAXPY en esa parte del vector.*/
+    }
+
+    // Esperar a que todos los hilos terminen
+    for (int t = 0; t < n_threads; t++) {
+        pthread_join(threads[t], NULL);
+    }
+
+	// Combinar resultados parciales de Y_avgs
+    for (int it = 0; it < max_iters; it++) {
+        for (int t = 1; t < n_threads; t++) {
+            // Combinar los valores parciales de Y_avgs de todos los hilos en el hilo 0
+            Y_avgs[it] += Y_avgs[it + t * max_iters];
+        }
+        // Calcular el promedio total dividiendo por el número de hilos
+        Y_avgs[it] /= p;
+    }
+	
 	gettimeofday(&t_end, NULL);
 
 #ifdef DEBUG
 	printf("RES: final vector Y= [ ");
 	for(i = 0; i < p-1; i++){
 		printf("%f, ", Y[i]);
-	}
+	}	
 	printf("%f ]\n", Y[p-1]);
 #endif
 	
@@ -126,5 +193,8 @@ int main(int argc, char* argv[]){
 	printf("Execution time: %f ms \n", exec_time);
 	printf("Last 3 values of Y: %f, %f, %f \n", Y[p-3], Y[p-2], Y[p-1]);
 	printf("Last 3 values of Y_avgs: %f, %f, %f \n", Y_avgs[max_iters-3], Y_avgs[max_iters-2], Y_avgs[max_iters-1]);
+	free(X);
+	free(Y);
+	free(Y_avgs);
 	return 0;
 }	
