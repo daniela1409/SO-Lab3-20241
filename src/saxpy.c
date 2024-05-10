@@ -28,6 +28,7 @@ struct ThreadArgs {
     int max_iters;
     int thread_id;
     double *Y_avgs;
+	int n_threads;
 };
 
 // Función que ejecutará cada hilo
@@ -42,13 +43,36 @@ void *saxpy_thread(void *args) {
     double a = thread_args->a;
     double *Y_avgs = thread_args->Y_avgs;
     int thread_id = thread_args->thread_id;
+	int n_threads = thread_args->n_threads;
 
-    // Dividir el trabajo
-    int start_index = (thread_id == 0) ? 0 : p / 2;
-    int end_index = (thread_id == 0) ? p / 2 : p;
+	int start_index, end_index;
+
+    // Dividir el trabajo en 2 hilos
+	if(n_threads==2){
+		start_index = (thread_id == 0) ? 0 : p / 2;
+    	end_index = (thread_id == 0) ? p / 2 : p;
+	}else if(n_threads==4){
+		start_index = (thread_id == 0) ? 0 : p / 4 * thread_id;
+		end_index = (thread_id == 3) ? p : p / 4 * (thread_id + 1);
+	}else if(n_threads==8){
+		start_index = (thread_id == 0) ? 0 : p / 8 * thread_id;
+		end_index = (thread_id == 7) ? p : p / 8 * (thread_id + 1);
+	}else{
+		start_index=0;
+		end_index=p;
+	}
+    
 	//si thread_id es igual a 0 (es decir, es el primer hilo), entonces start_index será 0, entonces este hilo comenzará desde el principio del vector. 
 	//Si thread_id no es 0 (es decir, es el segundo hilo), entonces start_index será p / 2, entonces este hilo comenzará desde la mitad del vector.
 
+	//Dividir el trabajo en 4 hilos
+	/*int start_index = (thread_id == 0) ? 0 : p / 4 * thread_id;
+	int end_index = (thread_id == 3) ? p : p / 4 * (thread_id + 1);*/
+
+	//Dividir el trabajo en 8 hilos
+	/**/
+
+	//printf("El hilo %d comienza en %d y termina en %d", thread_id, start_index, end_index);
     // Realizar operación SAXPY iterativa
     for (int it = 0; it < max_iters; it++) {
         for (int i = start_index; i < end_index; i++) {
@@ -64,7 +88,7 @@ int main(int argc, char* argv[]){
 	// Variables to obtain command line parameters
 	unsigned int seed = 1;
   	int p = 10000000;
-  	int n_threads = 2;
+  	int n_threads = atoi(argv[1]);
   	int max_iters = 1000;
   	// Variables to perform SAXPY operation
 	double* X;
@@ -157,6 +181,7 @@ int main(int argc, char* argv[]){
         thread_args[t].max_iters = max_iters;
         thread_args[t].thread_id = t;
         thread_args[t].Y_avgs = Y_avgs;
+		thread_args[t].n_threads = n_threads;
 
         pthread_create(&threads[t], NULL, saxpy_thread, (void *)&thread_args[t]);
 		/* Cada hilo recibe una parte diferente del trabajo y ejecuta la función saxpy_thread que realiza la operación SAXPY en esa parte del vector.*/
